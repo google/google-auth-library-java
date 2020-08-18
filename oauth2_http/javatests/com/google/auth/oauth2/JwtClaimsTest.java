@@ -31,11 +31,21 @@
 
 package com.google.auth.oauth2;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import org.junit.Test;
+import org.junit.function.ThrowingRunnable;
 
 public class JwtClaimsTest {
 
@@ -115,6 +125,43 @@ public class JwtClaimsTest {
   }
 
   @Test
+  public void testComplexAdditionalClaims() {
+    Map<String, String> map = ImmutableMap.of("aaa", "bbb");
+
+    Map<String, Object> complexClaims = new HashMap();
+    complexClaims.put("foo", "bar");
+    complexClaims.put("abc", 123);
+    complexClaims.put("def", 12.3);
+    complexClaims.put("ghi", map);
+    complexClaims.put("jkl", ImmutableList.of(1, 2, 3));
+    complexClaims.put("mno", new Date());
+
+    JwtClaims claims = JwtClaims.newBuilder().setAdditionalClaims(complexClaims).build();
+
+    Map<String, ?> additionalClaims = claims.getAdditionalClaims();
+    assertEquals(additionalClaims.size(), 6);
+    assertEquals(additionalClaims.get("ghi"), map);
+  }
+
+  @Test
+  public void testValidateAdditionalClaims() {
+    Map<String, Object> complexClaims = new HashMap<>();
+    complexClaims.put("abc", new HashSet<>());
+
+    final JwtClaims.Builder claimsBuilder =
+        JwtClaims.newBuilder().setAdditionalClaims(complexClaims);
+
+    assertThrows(
+        IllegalStateException.class,
+        new ThrowingRunnable() {
+          @Override
+          public void run() {
+            claimsBuilder.build();
+          }
+        });
+  }
+
+  @Test
   public void testMergeAdditionalClaims() {
     JwtClaims claims1 =
         JwtClaims.newBuilder().setAdditionalClaims(Collections.singletonMap("foo", "bar")).build();
@@ -124,13 +171,19 @@ public class JwtClaimsTest {
             .build();
     JwtClaims merged = claims1.merge(claims2);
 
+    Map<String, String> value = Collections.singletonMap("key2", "val2");
+    JwtClaims claims3 =
+        JwtClaims.newBuilder().setAdditionalClaims(Collections.singletonMap("def", value)).build();
+    JwtClaims complexMerged = merged.merge(claims3);
+
     assertNull(merged.getAudience());
     assertNull(merged.getIssuer());
     assertNull(merged.getSubject());
-    Map<String, String> mergedAdditionalClaims = merged.getAdditionalClaims();
+    Map<String, ?> mergedAdditionalClaims = complexMerged.getAdditionalClaims();
     assertNotNull(mergedAdditionalClaims);
-    assertEquals(2, mergedAdditionalClaims.size());
+    assertEquals(3, mergedAdditionalClaims.size());
     assertEquals("bar", mergedAdditionalClaims.get("foo"));
     assertEquals("qwer", mergedAdditionalClaims.get("asdf"));
+    assertEquals(value, mergedAdditionalClaims.get("def"));
   }
 }

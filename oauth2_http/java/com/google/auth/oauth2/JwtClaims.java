@@ -31,9 +31,14 @@
 
 package com.google.auth.oauth2;
 
+import com.google.api.client.util.Preconditions;
 import com.google.auto.value.AutoValue;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.io.Serializable;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
 
@@ -68,10 +73,10 @@ public abstract class JwtClaims implements Serializable {
    *
    * @return additional claims
    */
-  abstract Map<String, String> getAdditionalClaims();
+  abstract Map<String, ?> getAdditionalClaims();
 
   public static Builder newBuilder() {
-    return new AutoValue_JwtClaims.Builder().setAdditionalClaims(ImmutableMap.<String, String>of());
+    return new AutoValue_JwtClaims.Builder().setAdditionalClaims(ImmutableMap.<String, Object>of());
   }
 
   /**
@@ -83,7 +88,7 @@ public abstract class JwtClaims implements Serializable {
    * @return new claims
    */
   public JwtClaims merge(JwtClaims other) {
-    ImmutableMap.Builder<String, String> newClaimsBuilder = ImmutableMap.builder();
+    ImmutableMap.Builder<String, Object> newClaimsBuilder = ImmutableMap.builder();
     newClaimsBuilder.putAll(getAdditionalClaims());
     newClaimsBuilder.putAll(other.getAdditionalClaims());
 
@@ -111,14 +116,123 @@ public abstract class JwtClaims implements Serializable {
 
   @AutoValue.Builder
   public abstract static class Builder {
+    /** Basic types supported by JSON standard. */
+    private static List<Class<? extends Serializable>> SUPPORTED_BASIC_TYPES =
+        ImmutableList.of(
+            String.class,
+            Integer.class,
+            Double.class,
+            Float.class,
+            Boolean.class,
+            Date.class,
+            String[].class,
+            Integer[].class,
+            Double[].class,
+            Float[].class,
+            Boolean[].class,
+            Date[].class);
+
+    private static final String ERROR_MESSAGE =
+        "Invalid type on additional claims. Valid types are String, Integer, "
+            + "Double, Float, Boolean, Date, List and Map. Map keys must be Strings.";
+
     public abstract Builder setAudience(String audience);
 
     public abstract Builder setIssuer(String issuer);
 
     public abstract Builder setSubject(String subject);
 
-    public abstract Builder setAdditionalClaims(Map<String, String> additionalClaims);
+    public abstract Builder setAdditionalClaims(Map<String, ?> additionalClaims);
 
-    public abstract JwtClaims build();
+    protected abstract JwtClaims autoBuild();
+
+    public JwtClaims build() {
+      JwtClaims claims = autoBuild();
+      Preconditions.checkState(validateClaims(claims.getAdditionalClaims()), ERROR_MESSAGE);
+      return claims;
+    }
+
+    /**
+     * Validate if the objects on a Map are valid for a JWT claim.
+     *
+     * @param claims Map of claim objects to be validated
+     */
+    private static boolean validateClaims(Map<String, ?> claims) {
+      if (!validateKeys(claims)) {
+        return false;
+      }
+
+      for (Object claim : claims.values()) {
+        if (!validateObject(claim)) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    /**
+     * Validates if the object is a valid JSON supported type.
+     *
+     * @param object to be evaluated
+     */
+    private static final boolean validateObject(@Nullable Object object) {
+      // According to JSON spec, null is a valid value.
+      if (object == null) {
+        return true;
+      }
+
+      if (object instanceof List) {
+        return validateCollection((List) object);
+      } else if (object instanceof Map) {
+        return validateKeys((Map) object) && validateCollection(((Map) object).values());
+      }
+
+      return isSupportedValue(object);
+    }
+
+    /**
+     * Validates the keys on a given map. Keys must be Strings.
+     *
+     * @param map map to be evaluated
+     */
+    private static final boolean validateKeys(Map map) {
+      for (Object key : map.keySet()) {
+        if (!(key instanceof String)) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    /**
+     * Validates if a collection is a valid JSON value. Empty collections are considered valid.
+     *
+     * @param collection collection to be evaluated
+     */
+    private static final boolean validateCollection(Collection collection) {
+      if (collection.isEmpty()) {
+        return true;
+      }
+
+      for (Object item : collection) {
+        if (!validateObject(item)) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    /**
+     * Validates if the given object is an instance of a valid JSON basic type.
+     *
+     * @param value object to be evaluated.
+     */
+    private static final boolean isSupportedValue(Object value) {
+      Class clazz = value.getClass();
+      return SUPPORTED_BASIC_TYPES.contains(clazz);
+    }
   }
 }
